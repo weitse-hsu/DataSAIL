@@ -230,7 +230,7 @@ def datasail(
         f_args: Additional arguments for the tools in f_sim or f-dist
         f_clusters: Number of clusters to find in the f-data
         threads: number of threads to use for one CD-HIT run
-        foldseek_checkpoint_dir: Optional persistent Foldseek checkpoints, outside tmp_dir.
+        foldseek_checkpoint_dir: Optional persistent preparation checkpoints (including Foldseek), outside tmp_dir.
 
     Returns:
         Three dictionaries mapping techniques to another dictionary. The inner dictionary maps input id to their splits.

@@ -244,6 +244,26 @@ The general command to run FoldSeek in DataSAIL is
     foldseek easy-search <pdb_dir> <pdb_dir> aln.m8 tmp --format-output 'query,target,fident,qlen,lddt' --exhaustive-search 1 -e inf
 
 
+Preparation recovery (Python API)
+---------------------------------
+
+The optional ``datasail(..., foldseek_checkpoint_dir="checkpoints")`` argument
+retains completed Foldseek alignments/matrices, ECFP/Tanimoto ligand similarity,
+each axis's clustering, and the complete preparation state before solving.
+It is disabled by default. Repeating the call reuses the furthest compatible
+checkpoint, including mappings, exclusions, stratification, overflow decisions,
+and random states. An interrupted solver search restarts the complete solver
+invocation; individual runs, techniques, and search trees are not resumed.
+
+Use a dedicated persistent directory outside ``tmp_dir`` and a separate scratch
+directory for each invocation. Content/settings/source compatibility checks and
+exclusive locks protect reuse. Unsupported custom objects or scratch-dependent
+state are logged and computed normally without publishing that snapshot.
+The ``state/`` directory shares immutable binary arrays across stage snapshots;
+remove checkpoints yourself when recovery is no longer needed. BindArena
+integration is separate.
+
+
 MASH
 ====
 

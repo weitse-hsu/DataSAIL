@@ -44,71 +44,13 @@ def datasail_main(**kwargs) -> Optional[Tuple[Optional[Dict], Optional[Dict], Op
     start = time.time()
     LOGGER.info("Read data")
 
-    # read e-entities and f-entities
-    e_dataset, f_dataset, inter = read_data(**kwargs)
-
-    # if required, cluster the input otherwise define the cluster-maps to be None
-    clusters = list(filter(lambda x: x[0].startswith(SRC_CL), kwargs[KW_TECHNIQUES]))
-    cluster_e = len(clusters) != 0 and any(c[-1] in {DIM_2, MODE_E} for c in clusters)
-    cluster_f = len(clusters) != 0 and any(c[-1] in {DIM_2, MODE_F} for c in clusters)
-
-    if cluster_e:
-        LOGGER.info("Cluster first set of entities.")
-        e_kwargs = dict(kwargs)
-        if kwargs.get(KW_FOLDSEEK_CHECKPOINT_DIR) is not None:
-            e_kwargs[KW_FOLDSEEK_CHECKPOINT_DIR] = kwargs[KW_FOLDSEEK_CHECKPOINT_DIR] / "e"
-        e_dataset = cluster(e_dataset, **e_kwargs)
-    if cluster_f:
-        LOGGER.info("Cluster second set of entities.")
-        f_kwargs = dict(kwargs)
-        if kwargs.get(KW_FOLDSEEK_CHECKPOINT_DIR) is not None:
-            f_kwargs[KW_FOLDSEEK_CHECKPOINT_DIR] = kwargs[KW_FOLDSEEK_CHECKPOINT_DIR] / "f"
-        f_dataset = cluster(f_dataset, **f_kwargs)
-
-    if inter is not None:
-        if e_dataset.type is not None and f_dataset.type is not None:
-            new_inter = [(e_dataset.id_map[x[0]], f_dataset.id_map[x[1]])
-                         for x in filter(lambda x: x[0] in e_dataset.id_map and x[1] in f_dataset.id_map, inter)]
-        elif e_dataset.type is not None:
-            new_inter = [(e_dataset.id_map[x[0]], x[1]) for x in filter(lambda x: x[0] in e_dataset.id_map, inter)]
-        elif f_dataset.type is not None:
-            new_inter = [(x[0], f_dataset.id_map[x[1]]) for x in filter(lambda x: x[1] in f_dataset.id_map, inter)]
-        else:
-            raise ValueError()
+    if kwargs.get(KW_FOLDSEEK_CHECKPOINT_DIR) is None:
+        prepared = _prepare(kwargs)
     else:
-        new_inter = None
-    
-    e_dataset, pre_e_name_split_map, pre_e_cluster_split_map, e_split_ratios, e_split_names = check_dataset(
-        e_dataset,
-        kwargs[KW_SPLITS],
-        kwargs[KW_NAMES],
-        kwargs[KW_OVERFLOW],
-        kwargs[KW_LINKAGE],
-        [t for t in [TEC_I1 + MODE_E, TEC_I2, TEC_C1 + MODE_E, TEC_C2] if t in kwargs[KW_TECHNIQUES]],
-        # (TEC_I1 + MODE_E) if any(x in kwargs[KW_TECHNIQUES] for x in [TEC_I1 + MODE_E, TEC_I2]) else None, 
-        # TEC_I2 in kwargs[KW_TECHNIQUES],
-        # (TEC_C1 + MODE_E) if any(x in kwargs[KW_TECHNIQUES] for x in [TEC_C1 + MODE_E, TEC_C2]) else None,
-        # TEC_C2 in kwargs[KW_TECHNIQUES],
-    )
-    f_dataset, pre_f_name_split_map, pre_f_cluster_split_map, f_split_ratios, f_split_names = check_dataset(
-        f_dataset,
-        kwargs[KW_SPLITS],
-        kwargs[KW_NAMES],
-        kwargs[KW_OVERFLOW],
-        kwargs[KW_LINKAGE],
-        [t for t in [TEC_I1 + MODE_F, TEC_I2, TEC_C1 + MODE_F, TEC_C2] if t in kwargs[KW_TECHNIQUES]],
-        # (TEC_I1 + MODE_F) if any(x in kwargs[KW_TECHNIQUES] for x in [TEC_I1 + MODE_F, TEC_I2]) else None,
-        # TEC_I2 in kwargs[KW_TECHNIQUES],
-        # (TEC_C1 + MODE_F) if any(x in kwargs[KW_TECHNIQUES] for x in [TEC_C1 + MODE_F, TEC_C2]) else None,
-        # TEC_C2 in kwargs[KW_TECHNIQUES],
-    )
-
-    def append(key, mode):
-        if key[-1] == mode:
-            return key
-        return key + mode
-    split_ratios = {append(k, MODE_E): v for k, v in e_split_ratios.items()} | {append(k, MODE_F): v for k, v in f_split_ratios.items()}
-    split_names = {append(k, MODE_E): v for k, v in e_split_names.items()} | {append(k, MODE_F): v for k, v in f_split_names.items()}
+        from datasail.cluster._preparation_checkpoint import preparation
+        prepared = preparation(kwargs, _prepare)
+    (e_dataset, f_dataset, inter, new_inter, pre_e_name_split_map, pre_e_cluster_split_map,
+     pre_f_name_split_map, pre_f_cluster_split_map, split_ratios, split_names) = prepared
 
     LOGGER.info("Split data")
 
@@ -208,6 +150,76 @@ def datasail_main(**kwargs) -> Optional[Tuple[Optional[Dict], Optional[Dict], Op
         full_e_name_split_map = fill_split_maps(e_dataset, e_name_split_map)
         full_f_name_split_map = fill_split_maps(f_dataset, f_name_split_map)
         return full_e_name_split_map, full_f_name_split_map, inter_split_map
+
+
+def _prepare(kwargs):
+    # read e-entities and f-entities
+    e_dataset, f_dataset, inter = read_data(**kwargs)
+
+    # if required, cluster the input otherwise define the cluster-maps to be None
+    clusters = list(filter(lambda x: x[0].startswith(SRC_CL), kwargs[KW_TECHNIQUES]))
+    cluster_e = len(clusters) != 0 and any(c[-1] in {DIM_2, MODE_E} for c in clusters)
+    cluster_f = len(clusters) != 0 and any(c[-1] in {DIM_2, MODE_F} for c in clusters)
+
+    if cluster_e:
+        LOGGER.info("Cluster first set of entities.")
+        e_kwargs = dict(kwargs)
+        if kwargs.get(KW_FOLDSEEK_CHECKPOINT_DIR) is not None:
+            e_kwargs[KW_FOLDSEEK_CHECKPOINT_DIR] = kwargs[KW_FOLDSEEK_CHECKPOINT_DIR] / "e"
+        e_dataset = cluster(e_dataset, **e_kwargs)
+    if cluster_f:
+        LOGGER.info("Cluster second set of entities.")
+        f_kwargs = dict(kwargs)
+        if kwargs.get(KW_FOLDSEEK_CHECKPOINT_DIR) is not None:
+            f_kwargs[KW_FOLDSEEK_CHECKPOINT_DIR] = kwargs[KW_FOLDSEEK_CHECKPOINT_DIR] / "f"
+        f_dataset = cluster(f_dataset, **f_kwargs)
+
+    if inter is not None:
+        if e_dataset.type is not None and f_dataset.type is not None:
+            new_inter = [(e_dataset.id_map[x[0]], f_dataset.id_map[x[1]])
+                         for x in filter(lambda x: x[0] in e_dataset.id_map and x[1] in f_dataset.id_map, inter)]
+        elif e_dataset.type is not None:
+            new_inter = [(e_dataset.id_map[x[0]], x[1]) for x in filter(lambda x: x[0] in e_dataset.id_map, inter)]
+        elif f_dataset.type is not None:
+            new_inter = [(x[0], f_dataset.id_map[x[1]]) for x in filter(lambda x: x[1] in f_dataset.id_map, inter)]
+        else:
+            raise ValueError()
+    else:
+        new_inter = None
+
+    e_dataset, pre_e_name_split_map, pre_e_cluster_split_map, e_split_ratios, e_split_names = check_dataset(
+        e_dataset,
+        kwargs[KW_SPLITS],
+        kwargs[KW_NAMES],
+        kwargs[KW_OVERFLOW],
+        kwargs[KW_LINKAGE],
+        [t for t in [TEC_I1 + MODE_E, TEC_I2, TEC_C1 + MODE_E, TEC_C2] if t in kwargs[KW_TECHNIQUES]],
+        # (TEC_I1 + MODE_E) if any(x in kwargs[KW_TECHNIQUES] for x in [TEC_I1 + MODE_E, TEC_I2]) else None,
+        # TEC_I2 in kwargs[KW_TECHNIQUES],
+        # (TEC_C1 + MODE_E) if any(x in kwargs[KW_TECHNIQUES] for x in [TEC_C1 + MODE_E, TEC_C2]) else None,
+        # TEC_C2 in kwargs[KW_TECHNIQUES],
+    )
+    f_dataset, pre_f_name_split_map, pre_f_cluster_split_map, f_split_ratios, f_split_names = check_dataset(
+        f_dataset,
+        kwargs[KW_SPLITS],
+        kwargs[KW_NAMES],
+        kwargs[KW_OVERFLOW],
+        kwargs[KW_LINKAGE],
+        [t for t in [TEC_I1 + MODE_F, TEC_I2, TEC_C1 + MODE_F, TEC_C2] if t in kwargs[KW_TECHNIQUES]],
+        # (TEC_I1 + MODE_F) if any(x in kwargs[KW_TECHNIQUES] for x in [TEC_I1 + MODE_F, TEC_I2]) else None,
+        # TEC_I2 in kwargs[KW_TECHNIQUES],
+        # (TEC_C1 + MODE_F) if any(x in kwargs[KW_TECHNIQUES] for x in [TEC_C1 + MODE_F, TEC_C2]) else None,
+        # TEC_C2 in kwargs[KW_TECHNIQUES],
+    )
+
+    def append(key, mode):
+        if key[-1] == mode:
+            return key
+        return key + mode
+    split_ratios = {append(k, MODE_E): v for k, v in e_split_ratios.items()} | {append(k, MODE_F): v for k, v in f_split_ratios.items()}
+    split_names = {append(k, MODE_E): v for k, v in e_split_names.items()} | {append(k, MODE_F): v for k, v in f_split_names.items()}
+
+    return (e_dataset, f_dataset, inter, new_inter, pre_e_name_split_map, pre_e_cluster_split_map, pre_f_name_split_map, pre_f_cluster_split_map, split_ratios, split_names)
 
 
 def fill_split_maps(dataset: DataSet, name_split_map: Dict) -> Dict:

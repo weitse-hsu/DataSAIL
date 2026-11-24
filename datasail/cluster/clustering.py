@@ -38,6 +38,14 @@ def cluster(dataset: DataSet, **kwargs) -> DataSet:
     Returns:
         A dataset with modified properties according to clustering the data
     """
+    directory = kwargs.get(KW_FOLDSEEK_CHECKPOINT_DIR)
+    if directory is not None:
+        from datasail.cluster._preparation_checkpoint import clustered
+        return clustered(dataset, kwargs, _cluster)
+    return _cluster(dataset, **kwargs)
+
+
+def _cluster(dataset: DataSet, **kwargs) -> DataSet:
     cache = load_from_cache(dataset, **kwargs)
     if cache is not None:
         LOGGER.info("Loaded clustering from cache")
@@ -114,7 +122,11 @@ def similarity_clustering(dataset: DataSet, threads: int = 1, log_dir: Optional[
     elif dataset.similarity.lower() == DIAMOND:
         run_diamond(dataset, threads, log_dir, tmp_dir)
     elif dataset.similarity.lower() == ECFP:
-        run_ecfp(dataset)
+        if foldseek_checkpoint_dir is None:
+            run_ecfp(dataset)
+        else:
+            from datasail.cluster._preparation_checkpoint import ligand
+            ligand(dataset, foldseek_checkpoint_dir, run_ecfp)
     elif dataset.similarity.lower() == FOLDSEEK:
         if foldseek_checkpoint_dir is None:
             run_foldseek(dataset, threads, log_dir, tmp_dir)
@@ -126,7 +138,11 @@ def similarity_clustering(dataset: DataSet, threads: int = 1, log_dir: Optional[
         run_mmseqspp(dataset, threads, log_dir, tmp_dir)
     elif dataset.similarity.lower() in SIM_OPTIONS:
         if isinstance(dataset.data[dataset.names[0]], str):
-            run_ecfp(dataset, method=dataset.similarity.lower())
+            if foldseek_checkpoint_dir is not None and dataset.type == "M" and dataset.similarity.lower() == "tanimoto":
+                from datasail.cluster._preparation_checkpoint import ligand
+                ligand(dataset, foldseek_checkpoint_dir, run_ecfp)
+            else:
+                run_ecfp(dataset, method=dataset.similarity.lower())
         else:
             run_vector(dataset, method := dataset.similarity.lower())
             if method == "cosine":

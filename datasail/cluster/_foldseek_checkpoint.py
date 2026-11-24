@@ -80,7 +80,7 @@ def _read_json(path):
 
 
 @contextmanager
-def _locked(directory, identity):
+def _locked(directory, identity, *, allowed=None):
     # Import lazily so disabled checkpointing and non-POSIX imports are unaffected.
     try:
         import fcntl
@@ -92,7 +92,7 @@ def _locked(directory, identity):
     entries = list(directory.iterdir())
     if not (directory / "owner.json").exists() and entries:
         raise ValueError(f"Foldseek checkpoint directory is unowned or being initialized; use an empty directory: {directory}")
-    if any(p.name not in _FILES or p.is_symlink() for p in entries):
+    if any(not (allowed(p.name) if allowed else p.name in _FILES) or p.is_symlink() for p in entries):
         raise ValueError(f"Foldseek checkpoint directory contains unrelated files or symlinks: {directory}")
     fd = os.open(directory / ".lock", os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
     try:
