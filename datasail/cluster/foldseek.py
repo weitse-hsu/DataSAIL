@@ -5,6 +5,7 @@ import math
 import os
 import re
 import shutil
+import shlex
 import subprocess
 import tempfile
 from pathlib import Path
@@ -21,72 +22,88 @@ from datasail.settings import LOGGER, FOLDSEEK, INSTALLED
 _NULL_VALUES = frozenset(ConvertOptions().null_values)
 
 
-def run_foldseek(dataset: DataSet, threads: int = 1, log_dir: Optional[Path] = None, tmp_dir: Optional[Path] = None) -> None:
-    """
-    Run FoldSeek to cluster the proteins based on their structure.
+def run_foldseek(dataset: DataSet, threads: int = 1, log_dir: Optional[Path] = None,
+                 tmp_dir: Optional[Path] = None, *, checkpoint_dir: Optional[Path] = None) -> None:
+    """Compute Foldseek similarities, optionally retaining validated recovery files."""
+    if checkpoint_dir is not None:
+        from datasail.cluster._foldseek_checkpoint import checkpointed_foldseek
+        cluster_sim = checkpointed_foldseek(dataset, threads, log_dir, tmp_dir, checkpoint_dir)
+    else:
+        if not INSTALLED[FOLDSEEK]:
+            raise ValueError("Foldseek is not installed.")
+        sort_executable = _check_sort()
+        alignment = _run_foldseek_search(dataset, threads, log_dir, tmp_dir)
+        cluster_sim = _read_foldseek_similarity(
+            alignment, dataset, tmp_dir=tmp_dir, threads=threads,
+            sort_executable=sort_executable,
+        )
+        shutil.rmtree(alignment.parent, ignore_errors=True)
+        shutil.rmtree((tmp_dir or Path(".")) / "fs_tmp", ignore_errors=True)
+    dataset.cluster_names = dataset.names
+    dataset.cluster_map = dict((n, n) for n in dataset.names)
+    dataset.cluster_similarity = cluster_sim
 
-    Args:
-        dataset: DataSet holding all information on the dta to be clustered
-        threads: number of threads to use for one CD-HIT run
-        log_dir: Absolute path to the directory to store all the logs in
-        tmp_dir: Temporary directory to store intermediate files.
-    """
-    if not INSTALLED[FOLDSEEK]:
-        raise ValueError("Foldseek is not installed.")
-    sort_executable = _check_sort()
+
+def _run_foldseek_search(dataset, threads, log_dir, tmp_dir, *, verify_staged=None, lock_fd=None, results_folder=None):
+    """Run the existing native search once; leave its output for the caller."""
     user_args = MultiYAMLParser(FOLDSEEK).get_user_arguments(dataset.args, [])
 
     if tmp_dir is None:
         tmp_dir = Path(".")
     
-    results_folder = tmp_dir / Path("fs_results")
+    if results_folder is None:
+        results_folder = tmp_dir / "fs_results"
+        native_tmp = "tmp"
+    else:
+        # Keep directory enumeration and native scratch on the caller's filesystem;
+        # only the large alignment is written directly to persistent storage.
+        (tmp_dir / "fs_results").mkdir(parents=True, exist_ok=True)
+        native_tmp = str((tmp_dir / "fs_results" / "tmp").resolve())
 
     tmp = tmp_dir / Path("fs_tmp")
     tmp.mkdir(parents=True, exist_ok=True)
     for name in dataset.names:
         shutil.copy(dataset.data[name], tmp)
 
-    cmd = f"mkdir {str(results_folder)} && " \
-          f"cd {str(results_folder)} && " \
+    if verify_staged is not None:
+        verify_staged(tmp)
+
+    cmd = f"mkdir {shlex.quote(str(results_folder))} && " \
+          f"cd {shlex.quote(str(results_folder))} && " \
           f"foldseek " \
           f"easy-search " \
-          f"{str(tmp.resolve())} " \
-          f"{str(tmp.resolve())} " \
+          f"{shlex.quote(str(tmp.resolve()))} " \
+          f"{shlex.quote(str(tmp.resolve()))} " \
           f"aln.m8 " \
-          f"tmp " \
+          f"{shlex.quote(native_tmp)} " \
           f"--format-output 'query,target,fident,qlen,lddt' " \
           f"-e inf " \
           f"--threads {threads} " \
           f"{user_args} " \
           f"--exhaustive-search 1 &&" \
-          f"rm -rf ../fs_tmp"
+          f"rm -rf {shlex.quote(str(tmp.resolve()))}"
 
     if log_dir is None:
         cmd += "> /dev/null 2>&1"
     else:
-        cmd += f"> {(log_dir / f'{dataset.get_name()}_foldseek.log').resolve()}"
+        cmd += f"> {shlex.quote(str((log_dir / f'{dataset.get_name()}_foldseek.log').resolve()))}"
 
     if results_folder.exists():
-        cmd = f"rm -rf {str(results_folder)} && " + cmd
+        cmd = f"rm -rf {shlex.quote(str(results_folder))} && " + cmd
 
     LOGGER.info("Start FoldSeek clustering")
     LOGGER.info(cmd)
-    if os.system(cmd) != 0:
+    # The search shell inherits the checkpoint lock so parent death cannot let
+    # a relaunch delete scratch while the orphaned native search is still writing.
+    status = os.system(cmd) if lock_fd is None else subprocess.call(cmd, shell=True, pass_fds=(lock_fd,))
+    if status != 0:
         raise ValueError("Foldseek command failed; check its search output.")
 
     if not (results_folder / "aln.m8").exists():
         raise ValueError("Something went wrong with foldseek. The output file does not exist.")
 
-    cluster_sim = _read_foldseek_similarity(
-        results_folder / "aln.m8", dataset, tmp_dir=tmp_dir, threads=threads,
-        sort_executable=sort_executable,
-    )
-    shutil.rmtree(results_folder, ignore_errors=True)
-    shutil.rmtree(tmp, ignore_errors=True)
+    return results_folder / "aln.m8"
 
-    dataset.cluster_names = dataset.names
-    dataset.cluster_map = dict((n, n) for n in dataset.names)
-    dataset.cluster_similarity = cluster_sim
 
 
 def extract(tmp, names=()):

@@ -8,6 +8,7 @@ import numpy as np
 
 from datasail.argparse_patch import remove_patch
 from datasail.cluster.clustering import cluster
+from datasail.settings import KW_FOLDSEEK_CHECKPOINT_DIR
 from datasail.reader.read import read_data
 from datasail.reader.utils import DataSet
 from datasail.report import report
@@ -53,10 +54,16 @@ def datasail_main(**kwargs) -> Optional[Tuple[Optional[Dict], Optional[Dict], Op
 
     if cluster_e:
         LOGGER.info("Cluster first set of entities.")
-        e_dataset = cluster(e_dataset, **kwargs)
+        e_kwargs = dict(kwargs)
+        if kwargs.get(KW_FOLDSEEK_CHECKPOINT_DIR) is not None:
+            e_kwargs[KW_FOLDSEEK_CHECKPOINT_DIR] = kwargs[KW_FOLDSEEK_CHECKPOINT_DIR] / "e"
+        e_dataset = cluster(e_dataset, **e_kwargs)
     if cluster_f:
         LOGGER.info("Cluster second set of entities.")
-        f_dataset = cluster(f_dataset, **kwargs)
+        f_kwargs = dict(kwargs)
+        if kwargs.get(KW_FOLDSEEK_CHECKPOINT_DIR) is not None:
+            f_kwargs[KW_FOLDSEEK_CHECKPOINT_DIR] = kwargs[KW_FOLDSEEK_CHECKPOINT_DIR] / "f"
+        f_dataset = cluster(f_dataset, **f_kwargs)
 
     if inter is not None:
         if e_dataset.type is not None and f_dataset.type is not None:
