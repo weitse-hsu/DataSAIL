@@ -204,7 +204,7 @@ def test_public_api_reuses_after_downstream_failure_and_cleans_only_scratch(tmp_
     monkeypatch.setattr(routine, "check_dataset", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("downstream")))
     arguments = dict(techniques=["C1f", "I1f"], f_type="P", f_data=inputs, f_sim="foldseek", f_args="X",
                      splits=[1, 1], names=["train", "test"], epsilon=0.5, delta=0.5,
-                     threads=1, max_sec=2, foldseek_checkpoint_dir=tmp_path / "persistent")
+                     threads=1, max_sec=2, checkpoint_dir=tmp_path / "persistent")
     with pytest.raises(RuntimeError, match="downstream"):
         datasail(**arguments, tmp_dir=tmp_path / "first-api-scratch")
     assert not (tmp_path / "first-api-scratch").exists()
@@ -297,7 +297,7 @@ def test_public_api_rejects_overlap_before_cleanup(tmp_path):
     protected.mkdir()
     (protected / "sentinel").write_text("keep")
     with pytest.raises(ValueError, match="separate from tmp_dir"):
-        datasail(foldseek_checkpoint_dir=protected, tmp_dir=protected / "scratch")
+        datasail(checkpoint_dir=protected, tmp_dir=protected / "scratch")
     assert (protected / "sentinel").read_text() == "keep"
     assert not (protected / "scratch").exists()
 
@@ -320,7 +320,7 @@ def test_both_foldseek_axes_and_combined_techniques(tmp_path, setup):
                      e_data=inputs, f_data=inputs, e_sim="foldseek", f_sim="foldseek",
                      inter=[("P", "P"), ("Q", "Q")], e_args="X", f_args="X",
                      splits=[1, 1], names=["train", "test"], epsilon=0.5, delta=0.5,
-                     threads=1, max_sec=2, foldseek_checkpoint_dir=tmp_path / "persistent")
+                     threads=1, max_sec=2, checkpoint_dir=tmp_path / "persistent")
     fresh = datasail(**arguments, tmp_dir=tmp_path / "first")
     resumed = datasail(**arguments, tmp_dir=tmp_path / "second")
     assert counts == {"search": 2, "matrix": 2}
@@ -435,3 +435,147 @@ def test_invalid_search_output_is_not_completed(tmp_path, setup, monkeypatch, ro
     assert not (tmp_path / "checkpoints/alignment.json").exists()
     assert not (tmp_path / "checkpoints/matrix.json").exists()
     assert counts == {"search": 1, "matrix": 0}
+
+
+@pytest.mark.parametrize("phase", ["before_owner", "ownership_write", "ownership_rename"])
+@pytest.mark.parametrize("error", [OSError, KeyboardInterrupt])
+def test_interrupted_initialization_relaunches_with_same_lock(tmp_path, setup, monkeypatch, phase, error):
+    run, counts, _ = setup
+    if phase == "before_owner":
+        target, name = checkpoint, "_publish_json"
+    elif phase == "ownership_write":
+        target, name = json, "dump"
+    else:
+        target, name = os, "replace"
+    original = getattr(target, name)
+
+    def interrupted(*args, **kwargs):
+        if phase == "ownership_write" and Path(args[1].name).name == "owner.json.part":
+            args[1].write('{"format":"datasail-foldseek","version":')
+            args[1].flush()
+            raise error("initialization interrupted")
+        if phase != "ownership_write" and Path(args[0]).name == (
+                "owner.json" if phase == "before_owner" else "owner.json.part"):
+            raise error("initialization interrupted")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(target, name, interrupted)
+    with pytest.raises(error, match="initialization interrupted"):
+        run()
+    directory = tmp_path / "checkpoints"
+    inode = (directory / ".lock").stat().st_ino
+    assert not (directory / "owner.json").exists()
+    assert (directory / "owner.json.part").exists() == (phase != "before_owner")
+    assert counts == {"search": 0, "matrix": 0}
+    monkeypatch.setattr(target, name, original)
+    fresh = run(scratch="after-interrupted-initialization")
+    resumed = run(scratch="after-successful-publication")
+    assert counts == {"search": 1, "matrix": 1}
+    assert (directory / ".lock").stat().st_ino == inode
+    assert (directory / "owner.json").is_file()
+    assert not (directory / "owner.json.part").exists()
+    assert_bits(fresh.cluster_similarity, np.array([[1., .51], [.51, 1.]]))
+    assert_bits(resumed.cluster_similarity, fresh.cluster_similarity)
+
+
+def hold_initialization(path, ready, release, partial):
+    original = checkpoint._publish_json
+
+    def paused(owner, value):
+        if partial:
+            owner.with_name(owner.name + ".part").write_text('{"format":')
+        ready.set()
+        if not release.wait(20):
+            raise RuntimeError("initializer did not receive release")
+        return original(owner, value)
+
+    checkpoint._publish_json = paused
+    with checkpoint._locked(Path(path), {"input": "x"}):
+        pass
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_concurrent_initialization_and_recovery_after_process_death(tmp_path, partial):
+    context = multiprocessing.get_context("spawn")
+    ready, release = context.Event(), context.Event()
+    path = tmp_path / "persistent"
+    process = context.Process(target=hold_initialization, args=(str(path), ready, release, partial))
+    process.start()
+    try:
+        assert ready.wait(20)
+        inode = (path / ".lock").stat().st_ino
+        assert not (path / "owner.json").exists()
+        with pytest.raises(RuntimeError, match="in use"):
+            with checkpoint._locked(path, {"input": "x"}):
+                pytest.fail("two initializers")
+        process.terminate()
+        process.join(20)
+        assert not process.is_alive()
+        with checkpoint._locked(path, {"input": "x"}):
+            assert (path / ".lock").stat().st_ino == inode
+            assert json.loads((path / "owner.json").read_text())["search"] == {"input": "x"}
+            with pytest.raises(RuntimeError, match="in use"):
+                with checkpoint._locked(path, {"input": "x"}):
+                    pytest.fail("recovery replaced the locked inode")
+    finally:
+        release.set()
+        if process.is_alive():
+            process.terminate()
+        process.join()
+
+
+@pytest.mark.parametrize("remnant", [
+    "unrelated", "artifact", "partial-symlink", "partial-directory", "partial-hardlink",
+    "partial-identity", "lock-symlink", "lock-content",
+])
+def test_initialization_rejects_unsafe_remnants_without_overwriting(tmp_path, remnant):
+    directory = tmp_path / "persistent"
+    directory.mkdir()
+    lock = directory / ".lock"
+    lock.touch()
+    partial = directory / "owner.json.part"
+    caller = tmp_path / "caller"
+    caller.write_text("unrelated caller contents")
+    if remnant in ("unrelated", "artifact"):
+        (directory / ("caller.txt" if remnant == "unrelated" else "similarity.npy")).write_text("keep")
+    elif remnant == "partial-symlink":
+        partial.symlink_to(caller)
+    elif remnant == "partial-directory":
+        partial.mkdir()
+    elif remnant == "partial-hardlink":
+        os.link(caller, partial)
+    elif remnant == "partial-identity":
+        partial.write_text(json.dumps({"format": checkpoint._FORMAT, "version": checkpoint._VERSION,
+                                      "search": {"input": "different"}}))
+    elif remnant == "lock-symlink":
+        lock.unlink()
+        lock.symlink_to(caller)
+    else:
+        lock.write_text("caller-owned lock contents")
+    before = {p.name: ("symlink", os.readlink(p)) if p.is_symlink() else
+              ("directory", None) if p.is_dir() else ("file", p.read_bytes()) for p in directory.iterdir()}
+    with pytest.raises(ValueError):
+        with checkpoint._locked(directory, {"input": "x"}):
+            pytest.fail("unsafe initialization accepted")
+    after = {p.name: ("symlink", os.readlink(p)) if p.is_symlink() else
+             ("directory", None) if p.is_dir() else ("file", p.read_bytes()) for p in directory.iterdir()}
+    assert after == before
+    assert caller.read_text() == "unrelated caller contents"
+
+
+def test_initialization_rechecks_directory_after_lock_acquisition(tmp_path, monkeypatch):
+    import fcntl
+    directory = tmp_path / "persistent"
+    original = fcntl.flock
+
+    def changed(fd, flags):
+        result = original(fd, flags)
+        (directory / "caller.txt").write_text("appeared after locking")
+        return result
+
+    monkeypatch.setattr(fcntl, "flock", changed)
+    with pytest.raises(ValueError, match="unrelated"):
+        with checkpoint._locked(directory, {"input": "x"}):
+            pytest.fail("directory was not rechecked")
+    assert (directory / "caller.txt").read_text() == "appeared after locking"
+    assert not (directory / "owner.json").exists()

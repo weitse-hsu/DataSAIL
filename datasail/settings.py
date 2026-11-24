@@ -206,7 +206,7 @@ KW_MAX_SEC = "max_sec"
 KW_NAMES = "names"
 KW_OUTDIR = "output"
 KW_TMPDIR = "tmp_dir"
-KW_FOLDSEEK_CHECKPOINT_DIR = "foldseek_checkpoint_dir"
+KW_CHECKPOINT_DIR = "checkpoint_dir"
 KW_RUNS = "runs"
 KW_SOLVER = "solver"
 KW_SPLITS = "splits"
@@ -219,7 +219,7 @@ KW_OVERFLOW = "overflow"
 DEFAULT_KWARGS = {
     KW_CACHE: False,
     KW_CACHE_DIR: None,
-    KW_FOLDSEEK_CHECKPOINT_DIR: None,
+    KW_CHECKPOINT_DIR: None,
     KW_CLI: False,
     KW_DELTA: 0.1,
     KW_EPSILON: 0.1,

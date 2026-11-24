@@ -193,7 +193,7 @@ def datasail(
         f_args: str = "",
         f_clusters: int = 50,
         threads: int = 1,
-        foldseek_checkpoint_dir: str | Path | None = None,
+        checkpoint_dir: str | Path | None = None,
 ) -> Tuple[Dict, Dict, Dict]:
     """
     Entry point for the package usage of DataSAIL.
@@ -230,15 +230,15 @@ def datasail(
         f_args: Additional arguments for the tools in f_sim or f-dist
         f_clusters: Number of clusters to find in the f-data
         threads: number of threads to use for one CD-HIT run
-        foldseek_checkpoint_dir: Optional persistent preparation checkpoints (including Foldseek), outside tmp_dir.
+        checkpoint_dir: Optional persistent preparation checkpoints (including Foldseek), outside tmp_dir.
 
     Returns:
         Three dictionaries mapping techniques to another dictionary. The inner dictionary maps input id to their splits.
     """
 
-    if foldseek_checkpoint_dir is not None:
+    if checkpoint_dir is not None:
         from datasail.cluster._foldseek_checkpoint import validate_checkpoint_path
-        foldseek_checkpoint_dir = validate_checkpoint_path(foldseek_checkpoint_dir, tmp_dir)
+        checkpoint_dir = validate_checkpoint_path(checkpoint_dir, tmp_dir)
 
     kwargs = validate_args(
         output=to_path(output), tmp_dir=to_path(tmp_dir), techniques=techniques, inter=to_path(inter), inter_strat=to_path(inter_strat), max_sec=max_sec, verbosity=verbose,
@@ -248,7 +248,7 @@ def datasail(
         e_args=e_args, e_clusters=e_clusters, f_type=f_type, f_data=to_path(f_data), f_weights=to_path(f_weights),
         f_strat=to_path(f_strat), f_sim=to_path(f_sim), f_dist=to_path(f_dist), f_args=f_args, f_clusters=f_clusters,
         threads=threads, cli=False, overflow=overflow,
-        foldseek_checkpoint_dir=foldseek_checkpoint_dir,
+        checkpoint_dir=checkpoint_dir,
     )
     try:
         return datasail_main(**kwargs)

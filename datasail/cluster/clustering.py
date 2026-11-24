@@ -14,7 +14,7 @@ from datasail.cluster.cdhit_est import run_cdhit_est
 from datasail.cluster.diamond import run_diamond
 from datasail.cluster.ecfp import run_ecfp
 from datasail.cluster.foldseek import run_foldseek
-from datasail.settings import KW_FOLDSEEK_CHECKPOINT_DIR
+from datasail.settings import KW_CHECKPOINT_DIR
 from datasail.cluster.mash import run_mash
 from datasail.cluster.mmseqs2 import run_mmseqs
 from datasail.cluster.mmseqspp import run_mmseqspp
@@ -38,7 +38,7 @@ def cluster(dataset: DataSet, **kwargs) -> DataSet:
     Returns:
         A dataset with modified properties according to clustering the data
     """
-    directory = kwargs.get(KW_FOLDSEEK_CHECKPOINT_DIR)
+    directory = kwargs.get(KW_CHECKPOINT_DIR)
     if directory is not None:
         from datasail.cluster._preparation_checkpoint import clustered
         return clustered(dataset, kwargs, _cluster)
@@ -53,7 +53,7 @@ def _cluster(dataset: DataSet, **kwargs) -> DataSet:
 
     if isinstance(dataset.similarity, str):  # compute the similarity
         similarity_clustering(dataset, kwargs[KW_THREADS], kwargs[KW_LOGDIR], kwargs[KW_TMPDIR],
-                              foldseek_checkpoint_dir=kwargs.get(KW_FOLDSEEK_CHECKPOINT_DIR))
+                              checkpoint_dir=kwargs.get(KW_CHECKPOINT_DIR))
 
     elif isinstance(dataset.distance, str):  # compute the distance
         distance_clustering(dataset, kwargs[KW_THREADS], kwargs[KW_LOGDIR], kwargs[KW_TMPDIR])
@@ -95,7 +95,7 @@ def _cluster(dataset: DataSet, **kwargs) -> DataSet:
 
 
 def similarity_clustering(dataset: DataSet, threads: int = 1, log_dir: Optional[Path] = None, tmp_dir: Optional[Path] = None,
-                          *, foldseek_checkpoint_dir: Optional[Path] = None) -> None:
+                          *, checkpoint_dir: Optional[Path] = None) -> None:
     """
     Compute the similarity based cluster based on a cluster method.
 
@@ -122,25 +122,25 @@ def similarity_clustering(dataset: DataSet, threads: int = 1, log_dir: Optional[
     elif dataset.similarity.lower() == DIAMOND:
         run_diamond(dataset, threads, log_dir, tmp_dir)
     elif dataset.similarity.lower() == ECFP:
-        if foldseek_checkpoint_dir is None:
+        if checkpoint_dir is None:
             run_ecfp(dataset)
         else:
             from datasail.cluster._preparation_checkpoint import ligand
-            ligand(dataset, foldseek_checkpoint_dir, run_ecfp)
+            ligand(dataset, checkpoint_dir, run_ecfp)
     elif dataset.similarity.lower() == FOLDSEEK:
-        if foldseek_checkpoint_dir is None:
+        if checkpoint_dir is None:
             run_foldseek(dataset, threads, log_dir, tmp_dir)
         else:
-            run_foldseek(dataset, threads, log_dir, tmp_dir, checkpoint_dir=foldseek_checkpoint_dir)
+            run_foldseek(dataset, threads, log_dir, tmp_dir, checkpoint_dir=checkpoint_dir)
     elif dataset.similarity.lower() in [MMSEQS, MMSEQS2]:
         run_mmseqs(dataset, threads, log_dir, tmp_dir)
     elif dataset.similarity.lower() == MMSEQSPP:
         run_mmseqspp(dataset, threads, log_dir, tmp_dir)
     elif dataset.similarity.lower() in SIM_OPTIONS:
         if isinstance(dataset.data[dataset.names[0]], str):
-            if foldseek_checkpoint_dir is not None and dataset.type == "M" and dataset.similarity.lower() == "tanimoto":
+            if checkpoint_dir is not None and dataset.type == "M" and dataset.similarity.lower() == "tanimoto":
                 from datasail.cluster._preparation_checkpoint import ligand
-                ligand(dataset, foldseek_checkpoint_dir, run_ecfp)
+                ligand(dataset, checkpoint_dir, run_ecfp)
             else:
                 run_ecfp(dataset, method=dataset.similarity.lower())
         else:

@@ -5,6 +5,7 @@ import inspect
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 from contextlib import contextmanager
@@ -89,28 +90,45 @@ def _locked(directory, identity, *, allowed=None):
     directory.mkdir(parents=True, exist_ok=True)
     if directory.is_symlink():
         raise ValueError("Foldseek checkpoint directory must not be a symlink")
-    entries = list(directory.iterdir())
-    if not (directory / "owner.json").exists() and entries:
-        raise ValueError(f"Foldseek checkpoint directory is unowned or being initialized; use an empty directory: {directory}")
-    if any(not (allowed(p.name) if allowed else p.name in _FILES) or p.is_symlink() for p in entries):
+    lock = directory / ".lock"
+    if lock.is_symlink():
         raise ValueError(f"Foldseek checkpoint directory contains unrelated files or symlinks: {directory}")
-    fd = os.open(directory / ".lock", os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0), 0o600)
     try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise ValueError(f"Foldseek checkpoint lock must be a regular file: {directory}")
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise RuntimeError(f"Foldseek checkpoint directory is in use: {directory}") from error
+        # Inspect again under the lock: an initializer may have died before
+        # publishing ownership. Never unlink .lock or replace its inode.
+        entries = list(directory.iterdir())
+        if directory.is_symlink() or any(
+                not (allowed(p.name) if allowed else p.name in _FILES) or p.is_symlink() for p in entries):
+            raise ValueError(f"Foldseek checkpoint directory contains unrelated files or symlinks: {directory}")
         owner = directory / "owner.json"
+        initializing = not owner.exists()
+        if initializing and (os.fstat(fd).st_size or any(
+                p.name not in {".lock", "owner.json.part"} or not p.is_file() or p.stat().st_nlink != 1
+                for p in entries)):
+            raise ValueError(f"Foldseek checkpoint directory is unowned; use an empty directory: {directory}")
         expected = {"format": _FORMAT, "version": _VERSION, "search": identity}
-        if owner.exists():
-            try:
+        recorded = expected
+        try:
+            if not initializing:
                 recorded = _read_json(owner)
-            except (OSError, ValueError) as error:
-                raise ValueError(f"Invalid Foldseek checkpoint ownership metadata: {directory}") from error
-            if recorded != expected:
-                LOGGER.warning("Foldseek checkpoint search identity differs: %s", directory)
-                raise ValueError(f"Incompatible Foldseek checkpoint inputs, filename mapping, search parameters or implementation/tool version; use a new directory: {directory}")
-        else:
+            elif (directory / "owner.json.part").exists():
+                try:
+                    recorded = _read_json(directory / "owner.json.part")
+                except ValueError:
+                    pass  # A torn unpublished ownership record can be retried.
+        except (OSError, ValueError) as error:
+            raise ValueError(f"Invalid Foldseek checkpoint ownership metadata: {directory}") from error
+        if recorded != expected:
+            LOGGER.warning("Foldseek checkpoint search identity differs: %s", directory)
+            raise ValueError(f"Incompatible Foldseek checkpoint inputs, filename mapping, search parameters or implementation/tool version; use a new directory: {directory}")
+        if initializing:
             _publish_json(owner, expected)
         yield fd
     finally:

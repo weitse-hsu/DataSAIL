@@ -87,7 +87,7 @@ def test_disabled_fresh_recovered_state_models_and_assignments(tmp_path, monkeyp
         return result
 
     monkeypatch.setattr(routine, "_prepare", record)
-    fresh = datasail(**copy.deepcopy(fixture()), tmp_dir=tmp_path / "fresh", foldseek_checkpoint_dir=tmp_path / "checkpoint")
+    fresh = datasail(**copy.deepcopy(fixture()), tmp_dir=tmp_path / "fresh", checkpoint_dir=tmp_path / "checkpoint")
     assert fresh == baseline
     assert models == expected_models
     models.clear()
@@ -100,7 +100,7 @@ def test_disabled_fresh_recovered_state_models_and_assignments(tmp_path, monkeyp
         return original_solver(**kwargs)
 
     monkeypatch.setattr(routine, "run_solver", checked)
-    resumed = datasail(**copy.deepcopy(fixture()), tmp_dir=tmp_path / "different", foldseek_checkpoint_dir=tmp_path / "checkpoint")
+    resumed = datasail(**copy.deepcopy(fixture()), tmp_dir=tmp_path / "different", checkpoint_dir=tmp_path / "checkpoint")
     assert resumed == baseline
     assert models == expected_models
     assert len(observed) == 1
@@ -154,7 +154,7 @@ def test_failure_boundaries_and_furthest_reuse(tmp_path, monkeypatch, phase):
     solver = routine.run_solver
     if phase == "solver":
         monkeypatch.setattr(routine, "run_solver", lambda **kw: (_ for _ in ()).throw(KeyboardInterrupt("solver interrupted")))
-    arguments = dict(fixture(), foldseek_checkpoint_dir=tmp_path / "checkpoint")
+    arguments = dict(fixture(), checkpoint_dir=tmp_path / "checkpoint")
     with pytest.raises((KeyboardInterrupt, RuntimeError, OSError)):
         datasail(**copy.deepcopy(arguments), tmp_dir=tmp_path / "interrupted")
     before = counts.copy()
@@ -171,7 +171,7 @@ def test_failure_boundaries_and_furthest_reuse(tmp_path, monkeypatch, phase):
 
 
 def test_corrupt_preparation_falls_back_to_axes(tmp_path, monkeypatch):
-    args = dict(fixture(), foldseek_checkpoint_dir=tmp_path / "checkpoint")
+    args = dict(fixture(), checkpoint_dir=tmp_path / "checkpoint")
     expected = datasail(**copy.deepcopy(args), tmp_dir=tmp_path / "first")
     folder = tmp_path / "checkpoint/state"
     (folder / "preparation.json").write_text("truncated")
@@ -241,7 +241,7 @@ else:
     routine.check_dataset=forbidden
     routine.cluster=forbidden
 try:
-    result=datasail(**copy.deepcopy(fixture()),tmp_dir=root/phase,foldseek_checkpoint_dir=root/'checkpoint')
+    result=datasail(**copy.deepcopy(fixture()),tmp_dir=root/phase,checkpoint_dir=root/'checkpoint')
     (root/'result.pkl').write_bytes(pickle.dumps(result))
 except KeyboardInterrupt:
     assert phase=='interrupted'
@@ -272,7 +272,7 @@ def test_overflow_state_and_models_are_identical(tmp_path, monkeypatch, models, 
     monkeypatch.setattr(routine, "run_solver", observe)
     def execute(scratch, checkpoint=None):
         try:
-            return datasail(**copy.deepcopy(kwargs), tmp_dir=scratch, foldseek_checkpoint_dir=checkpoint)
+            return datasail(**copy.deepcopy(kwargs), tmp_dir=scratch, checkpoint_dir=checkpoint)
         except KeyError as error:
             # Existing assign-overflow reconstruction can omit preassignments.
             # Preserve and compare this failure, never repair it in resume code.
@@ -304,7 +304,7 @@ def test_changed_settings_reject_only_affected_stages(tmp_path, monkeypatch, cha
 
     monkeypatch.setattr(clustering, "run_ecfp", count)
     kwargs = fixture()
-    datasail(**copy.deepcopy(kwargs), tmp_dir=tmp_path / "fresh", foldseek_checkpoint_dir=tmp_path / "checkpoint")
+    datasail(**copy.deepcopy(kwargs), tmp_dir=tmp_path / "fresh", checkpoint_dir=tmp_path / "checkpoint")
     if change == "linkage":
         kwargs["linkage"] = "complete"
     elif change == "weights":
@@ -319,7 +319,7 @@ def test_changed_settings_reject_only_affected_stages(tmp_path, monkeypatch, cha
         kwargs["e_data"]["L0"] = "CCCO"
     else:
         kwargs["e_clusters"] = 3
-    result = datasail(**copy.deepcopy(kwargs), tmp_dir=tmp_path / "modified", foldseek_checkpoint_dir=tmp_path / "checkpoint")
+    result = datasail(**copy.deepcopy(kwargs), tmp_dir=tmp_path / "modified", checkpoint_dir=tmp_path / "checkpoint")
     baseline = datasail(**copy.deepcopy(kwargs), tmp_dir=tmp_path / "baseline")
     assert result == baseline
     assert len(calls) == (3 if change == "inputs" else 2)  # baseline always computes once
@@ -391,7 +391,7 @@ def test_ligand_failure_reuses_already_clustered_other_axis(tmp_path, monkeypatc
               for k, v in arguments.items()}
     kwargs.update(techniques=["C2"], runs=1, inter=[(f, e) for e, f in arguments["inter"]],
                   inter_strat={(f, e): v for (e, f), v in arguments["inter_strat"].items()})
-    kwargs["foldseek_checkpoint_dir"] = tmp_path / "checkpoint"
+    kwargs["checkpoint_dir"] = tmp_path / "checkpoint"
     calls = []
     ligand_calls = []
     cluster, ligand = clustering._cluster, clustering.run_ecfp
@@ -429,9 +429,9 @@ def test_changed_file_contents_invalidate_preparation(tmp_path, monkeypatch):
         return compute(*args, **kw)
 
     monkeypatch.setattr(clustering, "run_ecfp", observed)
-    datasail(**copy.deepcopy(kwargs), tmp_dir=tmp_path / "first", foldseek_checkpoint_dir=tmp_path / "checkpoint")
+    datasail(**copy.deepcopy(kwargs), tmp_dir=tmp_path / "first", checkpoint_dir=tmp_path / "checkpoint")
     source.write_text(source.read_text().replace("L0,CC\n", "L0,CCCO\n"))
-    actual = datasail(**copy.deepcopy(kwargs), tmp_dir=tmp_path / "second", foldseek_checkpoint_dir=tmp_path / "checkpoint")
+    actual = datasail(**copy.deepcopy(kwargs), tmp_dir=tmp_path / "second", checkpoint_dir=tmp_path / "checkpoint")
     expected = datasail(**copy.deepcopy(kwargs), tmp_dir=tmp_path / "disabled")
     assert actual == expected
     assert len(counts) == 3
@@ -539,7 +539,7 @@ def test_reader_rng_consumption_cannot_be_rewound_by_cached_axes(tmp_path, monke
         arguments["e_weights"] = weights(draws)
         with pytest.raises(AtSolver):
             datasail(**arguments, tmp_dir=tmp_path / str(index),
-                     foldseek_checkpoint_dir=tmp_path / "checkpoint" if checkpoint else None)
+                     checkpoint_dir=tmp_path / "checkpoint" if checkpoint else None)
     assert observed[0] != observed[1]
     assert observed[1] == observed[2]
 
@@ -548,3 +548,32 @@ def test_reader_rng_consumption_cannot_be_rewound_by_cached_axes(tmp_path, monke
     _, _, coverage = state._unpack(record["values"], folder)
     assert "duplicate" in coverage["input_ids"]
     assert coverage["excluded_ids"] == ["invalid"]
+
+
+def test_checkpoint_dir_public_api_preserves_positional_order(tmp_path, monkeypatch):
+    import inspect
+    parameters = inspect.signature(datasail).parameters
+    assert list(parameters)[-2:] == ["threads", "checkpoint_dir"]
+    assert "foldseek_checkpoint_dir" not in parameters
+    kwargs = fixture()
+    kwargs.update(techniques=["C2"], runs=1)
+    expected = datasail(**copy.deepcopy(kwargs), tmp_dir=tmp_path / "disabled-positional")
+    kwargs.update(tmp_dir=tmp_path / "fresh-positional", checkpoint_dir=tmp_path / "checkpoint")
+    positional = [copy.deepcopy(kwargs.get(name, parameter.default)) for name, parameter in parameters.items()]
+    assert datasail(*positional) == expected
+    monkeypatch.setattr(routine, "_prepare", lambda *args: pytest.fail("preparation reran"))
+    kwargs["tmp_dir"] = tmp_path / "resumed-positional"
+    assert datasail(**kwargs) == expected
+
+
+def test_state_entry_recovers_interrupted_ownership_write(tmp_path):
+    directory = tmp_path / "state"
+    directory.mkdir()
+    (directory / ".lock").touch()
+    (directory / "owner.json.part").write_text('{"format":')
+    inode = (directory / ".lock").stat().st_ino
+    with state._using(directory, tmp_path / "scratch") as store:
+        store.save("preparation", "identity", {"complete": True})
+    with state._using(directory, tmp_path / "different-scratch") as store:
+        assert store.load("preparation", "identity") == {"complete": True}
+    assert (directory / ".lock").stat().st_ino == inode

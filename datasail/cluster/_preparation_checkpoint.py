@@ -439,7 +439,7 @@ def _coverage(dataset, original_ids):
 
 
 def clustered(dataset, kwargs, compute):
-    directory = Path(kwargs["foldseek_checkpoint_dir"])
+    directory = Path(kwargs["checkpoint_dir"])
     stage = "cluster-" + directory.name
     try:
         identity = _signature((_dataset_identity(dataset), kwargs["linkage"], kwargs["threads"], _rng(),
@@ -497,7 +497,7 @@ def preparation(kwargs, compute):
     except UnsupportedState as error:
         LOGGER.warning("Did not checkpoint complete preparation: %s", error)
         return compute(kwargs)
-    with _using(Path(kwargs["foldseek_checkpoint_dir"]) / "state", kwargs.get("tmp_dir")) as store:
+    with _using(Path(kwargs["checkpoint_dir"]) / "state", kwargs.get("tmp_dir")) as store:
         state = store.load("preparation", identity)
         if state is not None:
             result, rng, coverage = state
