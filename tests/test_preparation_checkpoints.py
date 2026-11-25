@@ -553,7 +553,7 @@ def test_reader_rng_consumption_cannot_be_rewound_by_cached_axes(tmp_path, monke
 def test_checkpoint_dir_public_api_preserves_positional_order(tmp_path, monkeypatch):
     import inspect
     parameters = inspect.signature(datasail).parameters
-    assert list(parameters)[-2:] == ["threads", "checkpoint_dir"]
+    assert list(parameters)[-3:] == ["threads", "checkpoint_dir", "foldseek_sort_memory"]
     assert "foldseek_checkpoint_dir" not in parameters
     kwargs = fixture()
     kwargs.update(techniques=["C2"], runs=1)

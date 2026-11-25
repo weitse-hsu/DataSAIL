@@ -23,11 +23,11 @@ _NULL_VALUES = frozenset(ConvertOptions().null_values)
 
 
 def run_foldseek(dataset: DataSet, threads: int = 1, log_dir: Optional[Path] = None,
-                 tmp_dir: Optional[Path] = None, *, checkpoint_dir: Optional[Path] = None) -> None:
+                 tmp_dir: Optional[Path] = None, *, checkpoint_dir: Optional[Path] = None, sort_memory: str = "256M") -> None:
     """Compute Foldseek similarities, optionally retaining validated recovery files."""
     if checkpoint_dir is not None:
         from datasail.cluster._foldseek_checkpoint import checkpointed_foldseek
-        cluster_sim = checkpointed_foldseek(dataset, threads, log_dir, tmp_dir, checkpoint_dir)
+        cluster_sim = checkpointed_foldseek(dataset, threads, log_dir, tmp_dir, checkpoint_dir, sort_memory=sort_memory)
     else:
         if not INSTALLED[FOLDSEEK]:
             raise ValueError("Foldseek is not installed.")
@@ -35,7 +35,7 @@ def run_foldseek(dataset: DataSet, threads: int = 1, log_dir: Optional[Path] = N
         alignment = _run_foldseek_search(dataset, threads, log_dir, tmp_dir)
         cluster_sim = _read_foldseek_similarity(
             alignment, dataset, tmp_dir=tmp_dir, threads=threads,
-            sort_executable=sort_executable,
+            sort_executable=sort_executable, sort_memory=sort_memory,
         )
         shutil.rmtree(alignment.parent, ignore_errors=True)
         shutil.rmtree((tmp_dir or Path(".")) / "fs_tmp", ignore_errors=True)

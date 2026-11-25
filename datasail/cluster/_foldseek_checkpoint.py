@@ -232,7 +232,7 @@ def _save_matrix(matrix, directory, identity, names):
                   "processing": identity, "names": names, "sha256": digest})
 
 
-def checkpointed_foldseek(dataset, threads, log_dir, tmp_dir, checkpoint_dir):
+def checkpointed_foldseek(dataset, threads, log_dir, tmp_dir, checkpoint_dir, *, sort_memory="256M"):
     """Recover only search and matrix construction; later clustering is unchanged."""
     from datasail.cluster import foldseek
     from datasail.parsers import MultiYAMLParser
@@ -279,7 +279,7 @@ def checkpointed_foldseek(dataset, threads, log_dir, tmp_dir, checkpoint_dir):
             alignment = directory / "alignment.m8"
             LOGGER.info("Published completed Foldseek alignment: %s", alignment)
         matrix = foldseek._read_foldseek_similarity(alignment, dataset, tmp_dir=tmp_dir,
-                                                    threads=threads, sort_executable=foldseek._check_sort())
+                                                    threads=threads, sort_executable=foldseek._check_sort(), sort_memory=sort_memory)
         _save_matrix(matrix, directory, processing, list(dataset.names))
         LOGGER.info("Published completed Foldseek similarity matrix: %s", directory / "similarity.npy")
         return matrix

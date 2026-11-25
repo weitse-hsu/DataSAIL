@@ -53,7 +53,8 @@ def _cluster(dataset: DataSet, **kwargs) -> DataSet:
 
     if isinstance(dataset.similarity, str):  # compute the similarity
         similarity_clustering(dataset, kwargs[KW_THREADS], kwargs[KW_LOGDIR], kwargs[KW_TMPDIR],
-                              checkpoint_dir=kwargs.get(KW_CHECKPOINT_DIR))
+                              checkpoint_dir=kwargs.get(KW_CHECKPOINT_DIR),
+                              foldseek_sort_memory=kwargs.get("foldseek_sort_memory", "256M"))
 
     elif isinstance(dataset.distance, str):  # compute the distance
         distance_clustering(dataset, kwargs[KW_THREADS], kwargs[KW_LOGDIR], kwargs[KW_TMPDIR])
@@ -95,7 +96,7 @@ def _cluster(dataset: DataSet, **kwargs) -> DataSet:
 
 
 def similarity_clustering(dataset: DataSet, threads: int = 1, log_dir: Optional[Path] = None, tmp_dir: Optional[Path] = None,
-                          *, checkpoint_dir: Optional[Path] = None) -> None:
+                          *, checkpoint_dir: Optional[Path] = None, foldseek_sort_memory: str = "256M") -> None:
     """
     Compute the similarity based cluster based on a cluster method.
 
@@ -128,10 +129,11 @@ def similarity_clustering(dataset: DataSet, threads: int = 1, log_dir: Optional[
             from datasail.cluster._preparation_checkpoint import ligand
             ligand(dataset, checkpoint_dir, run_ecfp)
     elif dataset.similarity.lower() == FOLDSEEK:
+        options = {"sort_memory": foldseek_sort_memory} if foldseek_sort_memory != "256M" else {}
         if checkpoint_dir is None:
-            run_foldseek(dataset, threads, log_dir, tmp_dir)
+            run_foldseek(dataset, threads, log_dir, tmp_dir, **options)
         else:
-            run_foldseek(dataset, threads, log_dir, tmp_dir, checkpoint_dir=checkpoint_dir)
+            run_foldseek(dataset, threads, log_dir, tmp_dir, checkpoint_dir=checkpoint_dir, **options)
     elif dataset.similarity.lower() in [MMSEQS, MMSEQS2]:
         run_mmseqs(dataset, threads, log_dir, tmp_dir)
     elif dataset.similarity.lower() == MMSEQSPP:
